@@ -1,4 +1,7 @@
-﻿using Ardalis.GuardClauses;
+﻿using System.Configuration;
+using System.Text;
+using Ardalis.GuardClauses;
+using Azure.Messaging.ServiceBus;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -8,6 +11,9 @@ using Microsoft.eShopWeb.ApplicationCore.Exceptions;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
 using Microsoft.eShopWeb.Infrastructure.Identity;
 using Microsoft.eShopWeb.Web.Interfaces;
+using Microsoft.Net.Http.Headers;
+using Newtonsoft.Json;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Microsoft.eShopWeb.Web.Pages.Basket;
 
@@ -20,18 +26,24 @@ public class CheckoutModel : PageModel
     private string? _username = null;
     private readonly IBasketViewModelService _basketViewModelService;
     private readonly IAppLogger<CheckoutModel> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
 
     public CheckoutModel(IBasketService basketService,
         IBasketViewModelService basketViewModelService,
         SignInManager<ApplicationUser> signInManager,
         IOrderService orderService,
-        IAppLogger<CheckoutModel> logger)
+        IAppLogger<CheckoutModel> logger,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
     {
         _basketService = basketService;
         _signInManager = signInManager;
         _orderService = orderService;
         _basketViewModelService = basketViewModelService;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
     }
 
     public BasketViewModel BasketModel { get; set; } = new BasketViewModel();
@@ -54,8 +66,35 @@ public class CheckoutModel : PageModel
 
             var updateModel = items.ToDictionary(b => b.Id.ToString(), b => b.Quantity);
             await _basketService.SetQuantities(BasketModel.Id, updateModel);
-            await _orderService.CreateOrderAsync(BasketModel.Id, new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
+            var order = await _orderService.CreateOrderAsync(BasketModel.Id, new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
             await _basketService.DeleteBasketAsync(BasketModel.Id);
+
+            #region HttpClient
+            var httpClient = _httpClientFactory.CreateClient("DeliveryOrderProcessor");
+            var orderJson = JsonConvert.SerializeObject(order);
+            var content = new StringContent(orderJson, Encoding.UTF8, "application/json");
+            var deliveryOrderTask = httpClient.PostAsync("", content);
+            #endregion
+
+            #region ServiceBus
+            var serviceBusConnectionString = _configuration.GetConnectionString("ServiceBusConnection");
+
+            await using var client = new ServiceBusClient(serviceBusConnectionString);
+            await using var sender = client.CreateSender("orderitems");
+
+            var orderItems = order.OrderItems.Select(i => new
+            {
+                itemId = i.Id,
+                quantity = i.Units
+            }
+                                                    );
+            var orderItemsJson = JsonConvert.SerializeObject(orderItems);
+            var orderItemsMessage = new ServiceBusMessage(orderItemsJson);
+
+            var orderItemsTask = sender.SendMessageAsync(orderItemsMessage);
+            #endregion
+
+            await Task.WhenAll(deliveryOrderTask, orderItemsTask);
         }
         catch (EmptyBasketOnCheckoutException emptyBasketOnCheckoutException)
         {

@@ -260,3 +260,5 @@ pub/
 .devcontainer
 
 .azure
+# Azure Functions localsettings file
+local.settings.json

@@ -8,7 +8,7 @@ namespace Microsoft.eShopWeb.ApplicationCore.Entities.OrderAggregate;
 public class Order : BaseEntity, IAggregateRoot
 {
     #pragma warning disable CS8618 // Required by Entity Framework
-    private Order() {}
+    public Order() {}
 
     public Order(string buyerId, Address shipToAddress, List<OrderItem> items)
     {
@@ -35,13 +35,20 @@ public class Order : BaseEntity, IAggregateRoot
     //https://msdn.microsoft.com/en-us/library/e78dcd75(v=vs.110).aspx 
     public IReadOnlyCollection<OrderItem> OrderItems => _orderItems.AsReadOnly();
 
-    public decimal Total()
+    private decimal? total;
+    public decimal Total
     {
-        var total = 0m;
-        foreach (var item in _orderItems)
+        get
         {
-            total += item.UnitPrice * item.Units;
+            if (total == null)
+            {
+                total = 0m;
+                foreach (var item in _orderItems)
+                {
+                    total += item.UnitPrice * item.Units;
+                }
+            }
+            return total.Value;
         }
-        return total;
     }
 }

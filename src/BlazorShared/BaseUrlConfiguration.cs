@@ -6,4 +6,6 @@ public class BaseUrlConfiguration
 
     public string ApiBase { get; set; }
     public string WebBase { get; set; }
+
+    public string DeliveryOrderProcessorUrl { get; set; }
 }
